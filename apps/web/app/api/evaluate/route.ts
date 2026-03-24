@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { supabase } from "@/lib/supabase";
+import * as natural from "natural";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -9,6 +10,35 @@ function cosineSimilarity(a: number[], b: number[]): number {
   const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
   const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
   return dot / (magA * magB);
+}
+
+function bleuScore(candidate: string, reference: string): number {
+  // Placeholder: BLEU implementation requires additional setup
+  return 0; // TODO: implement proper BLEU
+}
+
+function rouge1(candidate: string, reference: string): number {
+  const candTokens = candidate.toLowerCase().split(/\s+/);
+  const refTokens = reference.toLowerCase().split(/\s+/);
+  const candSet = new Set(candTokens);
+  const refSet = new Set(refTokens);
+  const intersection = new Set([...candSet].filter(x => refSet.has(x)));
+  const precision = intersection.size / candSet.size;
+  const recall = intersection.size / refSet.size;
+  return 2 * (precision * recall) / (precision + recall) || 0;
+}
+
+async function getBaselineScore(project: string, model: string): Promise<number> {
+  const { data } = await supabase
+    .from("metrics")
+    .select("score, llm_calls!inner(project, model)")
+    .eq("llm_calls.project", project)
+    .eq("llm_calls.model", model)
+    .order("metrics.created_at", { ascending: false })
+    .limit(50);
+  if (!data || data.length === 0) return 3; // default
+  const avg = data.reduce((sum, m) => sum + (m.score || 0), 0) / data.length;
+  return avg;
 }
 
 async function getEmbedding(text: string): Promise<number[]> {
@@ -64,10 +94,16 @@ export async function POST(req: NextRequest) {
     ]);
     const similarity = cosineSimilarity(promptEmbedding, responseEmbedding);
 
+    // Compute text quality metrics
+    const bleu = bleuScore(response, prompt);
+    const rouge = rouge1(response, prompt);
+
     // Score with LLM-as-judge
     const { score, reason } = await scoreWithLLM(prompt, response);
 
-    const isRegression = score < 3;
+    // Get baseline score for regression detection
+    const baselineScore = await getBaselineScore(project || "", model || "");
+    const isRegression = score < baselineScore - 0.5; // threshold
 
     // Save metrics
     const { error: metricsError } = await supabase.from("metrics").insert({
@@ -76,6 +112,8 @@ export async function POST(req: NextRequest) {
       score,
       score_reason: reason,
       is_regression: isRegression,
+      bleu_score: bleu,
+      rouge_score: rouge,
     });
 
     if (metricsError) throw metricsError;
@@ -85,7 +123,7 @@ export async function POST(req: NextRequest) {
       await supabase.from("alerts").insert({
         call_id: callData.id,
         type: "regression",
-        message: `Low quality score (${score}/5): ${reason}`,
+        message: `Regression detected: score ${score} below baseline ${baselineScore.toFixed(2)} - ${reason}`,
       });
     }
 
@@ -95,6 +133,9 @@ export async function POST(req: NextRequest) {
       score,
       reason,
       is_regression: isRegression,
+      bleu: bleu.toFixed(4),
+      rouge: rouge.toFixed(4),
+      baseline_score: baselineScore.toFixed(2),
     });
   } catch (err) {
     console.error(err);

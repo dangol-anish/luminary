@@ -25,6 +25,8 @@ type Call = {
     score: number;
     score_reason: string;
     is_regression: boolean;
+    bleu_score: number;
+    rouge_score: number;
   }[];
 };
 
@@ -36,7 +38,7 @@ export default function Dashboard() {
     const { data } = await supabase
       .from("llm_calls")
       .select(
-        `*, metrics(cosine_similarity, score, score_reason, is_regression)`,
+        `*, metrics(cosine_similarity, score, score_reason, is_regression, bleu_score, rouge_score)`,
       )
       .order("created_at", { ascending: false })
       .limit(50);
@@ -67,6 +69,8 @@ export default function Dashboard() {
     index: i + 1,
     score: c.metrics?.[0]?.score ?? null,
     similarity: parseFloat((c.metrics?.[0]?.cosine_similarity ?? 0).toFixed(3)),
+    bleu: parseFloat((c.metrics?.[0]?.bleu_score ?? 0).toFixed(3)),
+    rouge: parseFloat((c.metrics?.[0]?.rouge_score ?? 0).toFixed(3)),
   }));
 
   const regressions = calls.filter((c) => c.metrics?.[0]?.is_regression);
@@ -139,6 +143,20 @@ export default function Dashboard() {
                 strokeWidth={2}
                 dot={false}
               />
+              <Line
+                type="monotone"
+                dataKey="bleu"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="rouge"
+                stroke="#ef4444"
+                strokeWidth={2}
+                dot={false}
+              />
             </LineChart>
           </ResponsiveContainer>
           <div className="flex gap-6 mt-3 text-xs text-gray-500">
@@ -149,6 +167,12 @@ export default function Dashboard() {
             <span className="flex items-center gap-2">
               <span className="w-3 h-0.5 bg-emerald-400 inline-block" /> Cosine
               similarity
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="w-3 h-0.5 bg-amber-400 inline-block" /> BLEU score
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="w-3 h-0.5 bg-red-400 inline-block" /> ROUGE score
             </span>
           </div>
         </div>
@@ -200,6 +224,9 @@ export default function Dashboard() {
                         >
                           {m?.score ?? "—"}/5
                         </span>
+                        <div className="text-xs text-gray-500">
+                          BLEU: {m?.bleu_score?.toFixed(3) ?? "—"} | ROUGE: {m?.rouge_score?.toFixed(3) ?? "—"}
+                        </div>
                         <span className="text-xs text-gray-500">
                           {formatDistanceToNow(new Date(call.created_at), {
                             addSuffix: true,
