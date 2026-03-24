@@ -524,7 +524,7 @@ export default function Dashboard() {
                     <span className="font-medium">{m.llm_calls?.project || "unknown"}</span>
                     <span>{new Date(m.created_at).toLocaleString()}</span>
                   </div>
-                  <div className="text-xs text-gray-400">Score: {m.score} | BLEU: {m.bleu_score.toFixed(4)} | ROUGE: {m.rouge_score.toFixed(4)} | Similarity: {m.cosine_similarity.toFixed(4)}</div>
+                  <div className="text-xs text-gray-400">Score: {m.score} | BLEU: {(m.bleu_score ?? 0).toFixed(4)} | ROUGE: {(m.rouge_score ?? 0).toFixed(4)} | Similarity: {(m.cosine_similarity ?? 0).toFixed(4)}</div>
                 </div>
               ))}
             </div>
