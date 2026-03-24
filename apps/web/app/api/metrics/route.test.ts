@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "assert";
-import { GET } from "./route.ts";
 
 test("GET /api/metrics returns 401 without auth", async () => {
+  const imported = await import("../../../.next/server/app/api/metrics/route.js");
+  const { GET } = imported.default.routeModule.userland;
   const result = await GET({
     headers: { get: () => null },
     nextUrl: new URL("http://localhost/api/metrics"),
