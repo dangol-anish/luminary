@@ -60,6 +60,9 @@ export default function Dashboard() {
   const [newPrompt, setNewPrompt] = useState("");
   const [newModel, setNewModel] = useState("gemini-2.5-flash");
   const [newProject, setNewProject] = useState("default");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [includeResolved, setIncludeResolved] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitResult, setSubmitResult] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -85,6 +88,8 @@ export default function Dashboard() {
     const params = new URLSearchParams();
     if (newProject) params.set("project", newProject);
     if (newModel) params.set("model", newModel);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
     params.set("limit", "50");
 
     const res = await fetch(`/api/calls?${params.toString()}`, {
@@ -165,7 +170,10 @@ export default function Dashboard() {
 
     const params = new URLSearchParams();
     if (newProject) params.set("project", newProject);
-    params.set("resolved", "false");
+    if (newModel) params.set("model", newModel);
+    params.set("resolved", includeResolved ? "true" : "false");
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
 
     const res = await fetch(`/api/alerts?${params.toString()}`, {
       headers: {
@@ -198,6 +206,8 @@ export default function Dashboard() {
     const params = new URLSearchParams();
     if (newProject) params.set("project", newProject);
     if (newModel) params.set("model", newModel);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
     params.set("limit", "200");
 
     const res = await fetch(`/api/metrics?${params.toString()}`, {
@@ -388,6 +398,37 @@ export default function Dashboard() {
               placeholder="Model (gemini-2.5-flash)"
               className="p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
             />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+              />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <label className="text-xs text-gray-400 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeResolved}
+                onChange={(e) => setIncludeResolved(e.target.checked)}
+                className="w-4 h-4"
+              />
+              Include resolved alerts
+            </label>
+            <button
+              onClick={() => { fetchAlerts(); fetchMetrics(); fetchCalls(); }}
+              className="px-3 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs"
+            >
+              Refresh filters
+            </button>
           </div>
           <textarea
             value={newPrompt}
