@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -33,6 +34,9 @@ type Call = {
 export default function Dashboard() {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [email, setEmail] = useState("");
+  const [authLoading, setAuthLoading] = useState(true);
 
   async function fetchCalls() {
     const { data } = await supabase
@@ -47,6 +51,29 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    // Expose supabase to browser console for debugging
+    if (typeof window !== "undefined") {
+      (window as any).supabase = supabase;
+    }
+
+    const setupAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+      setAuthLoading(false);
+
+      const { data: authListener } = supabase.auth.onAuthStateChange(
+        (_, session) => {
+          setSession(session);
+        },
+      );
+
+      return () => {
+        authListener.subscription?.unsubscribe();
+      };
+    };
+
+    setupAuth();
+
     fetchCalls();
 
     const channel = supabase
@@ -73,6 +100,55 @@ export default function Dashboard() {
     rouge: parseFloat((c.metrics?.[0]?.rouge_score ?? 0).toFixed(3)),
   }));
 
+  const signIn = async () => {
+    if (!email) {
+      alert("Please enter your email");
+      return;
+    }
+
+    setAuthLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({ email });
+    setAuthLoading(false);
+
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Magic link sent. Check your email.");
+    }
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+  };
+
+  if (authLoading) {
+    return <main className="min-h-screen p-8">Loading auth...</main>;
+  }
+
+  if (!session) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
+        <div className="max-w-md mx-auto">
+          <h1 className="text-2xl font-bold mb-4">Sign in to Luminary</h1>
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full p-2 rounded-md mb-2 bg-gray-900 border border-gray-700"
+          />
+          <button
+            onClick={signIn}
+            className="w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2 rounded-md"
+          >
+            Send magic link
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   const regressions = calls.filter((c) => c.metrics?.[0]?.is_regression);
   const avgScore = calls.length
     ? (
@@ -85,9 +161,17 @@ export default function Dashboard() {
     <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Luminary</h1>
-          <p className="text-gray-400 mt-1">LLM Observability Dashboard</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Luminary</h1>
+            <p className="text-gray-400 mt-1">LLM Observability Dashboard</p>
+          </div>
+          <button
+            onClick={signOut}
+            className="px-4 py-2 rounded-md bg-red-700 hover:bg-red-600"
+          >
+            Sign out
+          </button>
         </div>
 
         {/* Stats */}
@@ -169,7 +253,8 @@ export default function Dashboard() {
               similarity
             </span>
             <span className="flex items-center gap-2">
-              <span className="w-3 h-0.5 bg-amber-400 inline-block" /> BLEU score
+              <span className="w-3 h-0.5 bg-amber-400 inline-block" /> BLEU
+              score
             </span>
             <span className="flex items-center gap-2">
               <span className="w-3 h-0.5 bg-red-400 inline-block" /> ROUGE score
@@ -225,7 +310,8 @@ export default function Dashboard() {
                           {m?.score ?? "—"}/5
                         </span>
                         <div className="text-xs text-gray-500">
-                          BLEU: {m?.bleu_score?.toFixed(3) ?? "—"} | ROUGE: {m?.rouge_score?.toFixed(3) ?? "—"}
+                          BLEU: {m?.bleu_score?.toFixed(3) ?? "—"} | ROUGE:{" "}
+                          {m?.rouge_score?.toFixed(3) ?? "—"}
                         </div>
                         <span className="text-xs text-gray-500">
                           {formatDistanceToNow(new Date(call.created_at), {

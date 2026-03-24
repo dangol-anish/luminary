@@ -1,35 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { supabase } from "@/lib/supabase";
-import * as natural from "natural";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { cosineSimilarity, rouge1, bleuScore } from "./utils";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
-  const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-  const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-  return dot / (magA * magB);
-}
-
-function bleuScore(candidate: string, reference: string): number {
-  // Placeholder: BLEU implementation requires additional setup
-  return 0; // TODO: implement proper BLEU
-}
-
-function rouge1(candidate: string, reference: string): number {
-  const candTokens = candidate.toLowerCase().split(/\s+/);
-  const refTokens = reference.toLowerCase().split(/\s+/);
-  const candSet = new Set(candTokens);
-  const refSet = new Set(refTokens);
-  const intersection = new Set([...candSet].filter(x => refSet.has(x)));
-  const precision = intersection.size / candSet.size;
-  const recall = intersection.size / refSet.size;
-  return 2 * (precision * recall) / (precision + recall) || 0;
-}
-
-async function getBaselineScore(project: string, model: string): Promise<number> {
-  const { data } = await supabase
+async function getBaselineScore(
+  project: string,
+  model: string,
+): Promise<number> {
+  const { data } = await supabaseAdmin
     .from("metrics")
     .select("score, llm_calls!inner(project, model)")
     .eq("llm_calls.project", project)
@@ -68,8 +48,22 @@ Response: ${response}
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, response, model, sdk_version, user_id, project } =
-      await req.json();
+    const authHeader = req.headers.get("authorization");
+    const token = authHeader?.split(" ")[1] ?? null;
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { prompt, response, model, sdk_version, project } = await req.json();
 
     if (!prompt || !response) {
       return NextResponse.json(
@@ -78,10 +72,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Save the LLM call
-    const { data: callData, error: callError } = await supabase
+    // Save the LLM call under admin access
+    const { data: callData, error: callError } = await supabaseAdmin
       .from("llm_calls")
-      .insert({ prompt, response, model, sdk_version, user_id, project })
+      .insert({ prompt, response, model, sdk_version, user_id: user.id, project })
       .select()
       .single();
 
@@ -106,7 +100,7 @@ export async function POST(req: NextRequest) {
     const isRegression = score < baselineScore - 0.5; // threshold
 
     // Save metrics
-    const { error: metricsError } = await supabase.from("metrics").insert({
+    const { error: metricsError } = await supabaseAdmin.from("metrics").insert({
       call_id: callData.id,
       cosine_similarity: similarity,
       score,
@@ -120,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     // Create alert if regression detected
     if (isRegression) {
-      await supabase.from("alerts").insert({
+      await supabaseAdmin.from("alerts").insert({
         call_id: callData.id,
         type: "regression",
         message: `Regression detected: score ${score} below baseline ${baselineScore.toFixed(2)} - ${reason}`,
