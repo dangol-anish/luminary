@@ -1,65 +1,219 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { formatDistanceToNow } from "date-fns";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+
+type Call = {
+  id: string;
+  created_at: string;
+  prompt: string;
+  response: string;
+  model: string;
+  project: string;
+  metrics: {
+    cosine_similarity: number;
+    score: number;
+    score_reason: string;
+    is_regression: boolean;
+  }[];
+};
+
+export default function Dashboard() {
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function fetchCalls() {
+    const { data } = await supabase
+      .from("llm_calls")
+      .select(
+        `*, metrics(cosine_similarity, score, score_reason, is_regression)`,
+      )
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (data) setCalls(data);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    fetchCalls();
+
+    const channel = supabase
+      .channel("realtime-calls")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "llm_calls" },
+        () => {
+          fetchCalls();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const chartData = [...calls].reverse().map((c, i) => ({
+    index: i + 1,
+    score: c.metrics?.[0]?.score ?? null,
+    similarity: parseFloat((c.metrics?.[0]?.cosine_similarity ?? 0).toFixed(3)),
+  }));
+
+  const regressions = calls.filter((c) => c.metrics?.[0]?.is_regression);
+  const avgScore = calls.length
+    ? (
+        calls.reduce((sum, c) => sum + (c.metrics?.[0]?.score ?? 0), 0) /
+        calls.length
+      ).toFixed(2)
+    : "—";
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
+        {/* Header */}
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Luminary</h1>
+          <p className="text-gray-400 mt-1">LLM Observability Dashboard</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <p className="text-gray-400 text-sm">Total calls</p>
+            <p className="text-3xl font-semibold mt-1">{calls.length}</p>
+          </div>
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <p className="text-gray-400 text-sm">Avg quality score</p>
+            <p className="text-3xl font-semibold mt-1">
+              {avgScore}
+              <span className="text-gray-500 text-lg">/5</span>
+            </p>
+          </div>
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <p className="text-gray-400 text-sm">Regressions</p>
+            <p
+              className={`text-3xl font-semibold mt-1 ${regressions.length > 0 ? "text-red-400" : "text-green-400"}`}
+            >
+              {regressions.length}
+            </p>
+          </div>
         </div>
-      </main>
-    </div>
+
+        {/* Chart */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Quality score over time</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="index" stroke="#6b7280" tick={{ fontSize: 12 }} />
+              <YAxis domain={[0, 5]} stroke="#6b7280" tick={{ fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{
+                  background: "#111827",
+                  border: "1px solid #374151",
+                  borderRadius: 8,
+                }}
+                labelStyle={{ color: "#9ca3af" }}
+              />
+              <Line
+                type="monotone"
+                dataKey="score"
+                stroke="#818cf8"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="similarity"
+                stroke="#34d399"
+                strokeWidth={2}
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="flex gap-6 mt-3 text-xs text-gray-500">
+            <span className="flex items-center gap-2">
+              <span className="w-3 h-0.5 bg-indigo-400 inline-block" /> Quality
+              score
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="w-3 h-0.5 bg-emerald-400 inline-block" /> Cosine
+              similarity
+            </span>
+          </div>
+        </div>
+
+        {/* Calls table */}
+        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-800">
+            <p className="font-medium">Recent calls</p>
+          </div>
+          {loading ? (
+            <div className="p-8 text-center text-gray-500">Loading...</div>
+          ) : (
+            <div className="divide-y divide-gray-800">
+              {calls.map((call) => {
+                const m = call.metrics?.[0];
+                return (
+                  <div
+                    key={call.id}
+                    className="px-6 py-4 hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {call.prompt}
+                        </p>
+                        <p className="text-sm text-gray-400 truncate mt-0.5">
+                          {call.response}
+                        </p>
+                        {m?.score_reason && (
+                          <p className="text-xs text-gray-500 mt-1 italic">
+                            {m.score_reason}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        {m?.is_regression && (
+                          <span className="text-xs bg-red-900/50 text-red-400 border border-red-800 px-2 py-0.5 rounded-full">
+                            regression
+                          </span>
+                        )}
+                        <span
+                          className={`text-sm font-semibold ${
+                            (m?.score ?? 0) >= 4
+                              ? "text-green-400"
+                              : (m?.score ?? 0) >= 3
+                                ? "text-yellow-400"
+                                : "text-red-400"
+                          }`}
+                        >
+                          {m?.score ?? "—"}/5
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatDistanceToNow(new Date(call.created_at), {
+                            addSuffix: true,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
