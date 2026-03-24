@@ -1,6 +1,6 @@
-import assert from "assert";
-import { test } from "node:test";
-import { evaluateCall, setFetch } from "../dist/index.js";
+const assert = require("assert");
+const { test } = require("node:test");
+const { evaluateCall, setFetch } = require("../dist/index.js");
 
 // Mock network call to avoid needing live backend
 class MockResponse {
@@ -20,6 +20,8 @@ class MockResponse {
 test("evaluateCall can call the API and parse response", async () => {
   setFetch(async (url, options) => {
     assert.strictEqual(url, "http://localhost:3000/api/evaluate");
+    assert.strictEqual(options.headers["Content-Type"], "application/json");
+    assert.strictEqual(options.headers.Authorization, "Bearer api_token_123");
     const body = JSON.parse(options.body);
     assert.strictEqual(body.prompt, "What is the capital of France?");
     return new MockResponse(200, {
@@ -41,6 +43,7 @@ test("evaluateCall can call the API and parse response", async () => {
     project: "test-project",
     sdk_version: "0.1.0",
     user_id: "test-user",
+    api_key: "api_token_123",
     endpoint: "http://localhost:3000/api/evaluate",
   });
 

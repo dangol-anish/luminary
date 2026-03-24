@@ -24,11 +24,17 @@ export async function evaluateCall(input: EvaluateInput): Promise<EvaluateResult
     project: input.project,
   };
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (input.api_key) {
+    headers.Authorization = `Bearer ${input.api_key}`;
+  }
+
   const response = await fetchFn(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 

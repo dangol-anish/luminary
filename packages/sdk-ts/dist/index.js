@@ -25,11 +25,15 @@ async function evaluateCall(input) {
         user_id: input.user_id,
         project: input.project,
     };
+    const headers = {
+        "Content-Type": "application/json",
+    };
+    if (input.api_key) {
+        headers.Authorization = `Bearer ${input.api_key}`;
+    }
     const response = await fetchFn(endpoint, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify(body),
     });
     if (!response.ok) {

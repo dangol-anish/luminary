@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
-    "build": "npm run build --workspace=apps/web"
+    "build": "npm run build --workspace=apps/web",
+    "test": "npm run test --workspace=packages/sdk-ts && npm run test --workspace=apps/web"
   }
 }

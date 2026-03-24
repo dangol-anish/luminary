@@ -63,19 +63,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { prompt, response, model, sdk_version, project } = await req.json();
+    let { prompt, response, model, sdk_version, project } = await req.json();
 
-    if (!prompt || !response) {
+    if (!prompt) {
       return NextResponse.json(
-        { error: "prompt and response are required" },
+        { error: "prompt is required" },
         { status: 400 },
       );
+    }
+
+    const modelName = model || "gemini-2.5-flash";
+
+    if (!response) {
+      const modelHandle = genAI.getGenerativeModel({ model: modelName });
+      const generation = await modelHandle.generateContent(prompt);
+      response = generation.response.text().trim();
     }
 
     // Save the LLM call under admin access
     const { data: callData, error: callError } = await supabaseAdmin
       .from("llm_calls")
-      .insert({ prompt, response, model, sdk_version, user_id: user.id, project })
+      .insert({ prompt, response, model: modelName, sdk_version, user_id: user.id, project })
       .select()
       .single();
 

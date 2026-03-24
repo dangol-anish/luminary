@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS metrics (
   score FLOAT,
   score_reason TEXT,
   is_regression BOOLEAN DEFAULT FALSE,
+  bleu_score FLOAT,
+  rouge_score FLOAT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -5,6 +5,7 @@ export interface EvaluateInput {
   sdk_version?: string;
   user_id?: string;
   project?: string;
+  api_key?: string;
   endpoint?: string;
 }
 

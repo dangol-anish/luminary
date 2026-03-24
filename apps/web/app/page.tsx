@@ -31,6 +31,25 @@ type Call = {
   }[];
 };
 
+type Metric = {
+  id: string;
+  call_id: string;
+  cosine_similarity: number;
+  score: number;
+  score_reason: string;
+  is_regression: boolean;
+  bleu_score: number;
+  rouge_score: number;
+  created_at: string;
+  llm_calls?: {
+    prompt: string;
+    response: string;
+    model: string;
+    project: string;
+    created_at: string;
+  };
+};
+
 export default function Dashboard() {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,17 +57,194 @@ export default function Dashboard() {
   const [email, setEmail] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
 
+  const [newPrompt, setNewPrompt] = useState("");
+  const [newModel, setNewModel] = useState("gemini-2.5-flash");
+  const [newProject, setNewProject] = useState("default");
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitResult, setSubmitResult] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+
   async function fetchCalls() {
-    const { data } = await supabase
-      .from("llm_calls")
-      .select(
-        `*, metrics(cosine_similarity, score, score_reason, is_regression, bleu_score, rouge_score)`,
-      )
-      .order("created_at", { ascending: false })
-      .limit(50);
-    if (data) setCalls(data);
+    setLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setSubmitError("User is not authenticated.");
+      setLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (newProject) params.set("project", newProject);
+    if (newModel) params.set("model", newModel);
+    params.set("limit", "50");
+
+    const res = await fetch(`/api/calls?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!res.ok) {
+      const json = await res.json();
+      setSubmitError(json.error || "Failed to load calls");
+      setLoading(false);
+      return;
+    }
+
+    const json = await res.json();
+    setCalls(json.data || []);
     setLoading(false);
   }
+
+  async function submitPrompt() {
+    if (!newPrompt.trim()) {
+      setSubmitError("Please enter a prompt.");
+      return;
+    }
+
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setSubmitError("User is not authenticated.");
+      return;
+    }
+
+    setSubmitLoading(true);
+    setSubmitError(null);
+    setSubmitResult(null);
+
+    try {
+      const res = await fetch("/api/evaluate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          prompt: newPrompt,
+          model: newModel,
+          project: newProject,
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || "Failed to evaluate prompt.");
+      }
+
+      const json = await res.json();
+      setSubmitResult(`Score: ${json.score}/5 | BLEU: ${json.bleu} | ROUGE: ${json.rouge}`);
+      setNewPrompt("");
+      await fetchCalls();
+      await fetchAlerts();
+    } catch (err: any) {
+      setSubmitError(err.message || "Error submitting prompt.");
+    } finally {
+      setSubmitLoading(false);
+    }
+  }
+
+  async function fetchAlerts() {
+    setAlertsLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setAlertsError("User is not authenticated.");
+      setAlertsLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (newProject) params.set("project", newProject);
+    params.set("resolved", "false");
+
+    const res = await fetch(`/api/alerts?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!res.ok) {
+      const json = await res.json();
+      setAlertsError(json.error || "Failed to load alerts");
+      setAlertsLoading(false);
+      return;
+    }
+
+    const json = await res.json();
+    setAlerts(json.data || []);
+    setAlertsLoading(false);
+  }
+
+  async function fetchMetrics() {
+    setMetricsLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setMetricsError("User is not authenticated.");
+      setMetricsLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (newProject) params.set("project", newProject);
+    if (newModel) params.set("model", newModel);
+    params.set("limit", "200");
+
+    const res = await fetch(`/api/metrics?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!res.ok) {
+      const json = await res.json();
+      setMetricsError(json.error || "Failed to load metrics");
+      setMetricsLoading(false);
+      return;
+    }
+
+    const json = await res.json();
+    setMetrics(json.data || []);
+    setMetricsLoading(false);
+  }
+
+  async function resolveAlert(id: string) {
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setAlertsError("User is not authenticated.");
+      return;
+    }
+
+    const res = await fetch("/api/alerts", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ id, resolved: true }),
+    });
+
+    if (!res.ok) {
+      const json = await res.json();
+      setAlertsError(json.error || "Failed to resolve alert");
+      return;
+    }
+
+    await fetchAlerts();
+    await fetchCalls();
+  }
+
 
   useEffect(() => {
     // Expose supabase to browser console for debugging
@@ -75,6 +271,8 @@ export default function Dashboard() {
     setupAuth();
 
     fetchCalls();
+    fetchAlerts();
+    fetchMetrics();
 
     const channel = supabase
       .channel("realtime-calls")
@@ -174,6 +372,42 @@ export default function Dashboard() {
           </button>
         </div>
 
+        {/* Prompt submission */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Run prompt and evaluate</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <input
+              value={newProject}
+              onChange={(e) => setNewProject(e.target.value)}
+              placeholder="Project"
+              className="p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+            />
+            <input
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              placeholder="Model (gemini-2.5-flash)"
+              className="p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+            />
+          </div>
+          <textarea
+            value={newPrompt}
+            onChange={(e) => setNewPrompt(e.target.value)}
+            placeholder="Enter prompt to send to LLM"
+            className="w-full min-h-[90px] mt-3 p-3 rounded-md bg-gray-800 border border-gray-700 text-sm"
+          />
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={submitPrompt}
+              disabled={submitLoading}
+              className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {submitLoading ? "Submitting..." : "Run and Evaluate"}
+            </button>
+            {submitResult && <span className="text-sm text-emerald-300">{submitResult}</span>}
+            {submitError && <span className="text-sm text-red-300">{submitError}</span>}
+          </div>
+        </div>
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
@@ -195,6 +429,65 @@ export default function Dashboard() {
               {regressions.length}
             </p>
           </div>
+        </div>
+
+        {/* Alerts */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Active regression alerts</p>
+          {alertsLoading ? (
+            <div className="text-gray-400">Loading alerts...</div>
+          ) : alertsError ? (
+            <div className="text-red-300">{alertsError}</div>
+          ) : alerts.length === 0 ? (
+            <div className="text-gray-400">No active regression alerts.</div>
+          ) : (
+            <div className="space-y-2">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className="p-3 rounded-md bg-gray-800 border border-gray-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-3"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-200 font-medium">{alert.type}</p>
+                    <p className="text-xs text-gray-400 mt-1">{alert.message}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {alert.llm_calls?.project} / {alert.llm_calls?.model}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => resolveAlert(alert.id)}
+                    className="px-3 py-1 text-xs rounded-md bg-emerald-700 hover:bg-emerald-600"
+                  >
+                    Mark resolved
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Metrics history */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Metrics history</p>
+          {metricsLoading ? (
+            <div className="text-gray-400">Loading metrics...</div>
+          ) : metricsError ? (
+            <div className="text-red-300">{metricsError}</div>
+          ) : metrics.length === 0 ? (
+            <div className="text-gray-400">No metrics found.</div>
+          ) : (
+            <div className="text-sm text-gray-300 space-y-2 max-h-48 overflow-y-auto">
+              {metrics.slice(0, 20).map((m) => (
+                <div key={m.id} className="p-2 border border-gray-800 rounded-md">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{m.llm_calls?.project || "unknown"}</span>
+                    <span>{new Date(m.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="text-xs text-gray-400">Score: {m.score} | BLEU: {m.bleu_score.toFixed(4)} | ROUGE: {m.rouge_score.toFixed(4)} | Similarity: {m.cosine_similarity.toFixed(4)}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Chart */}

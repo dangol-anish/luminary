@@ -1,7 +1,7 @@
 {
   "name": "@luminary/sdk-ts",
   "version": "0.1.0",
-  "type": "module",
+  "type": "commonjs",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

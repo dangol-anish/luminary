@@ -19,6 +19,10 @@ test("rouge1 computes recall/precision harmonics", () => {
   assert.ok(score > 0);
 });
 
-test("bleuScore placeholder returns 0", () => {
+test("bleuScore with identical text returns 1", () => {
+  assert.ok(bleuScore("hello world", "hello world") > 0.99);
+});
+
+test("bleuScore for no overlap returns 0", () => {
   assert.strictEqual(bleuScore("foo", "bar"), 0);
 });
