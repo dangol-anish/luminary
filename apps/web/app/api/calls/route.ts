@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server.js";
-import { supabaseAdmin } from "../../../lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 async function authenticate(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -22,6 +23,19 @@ export async function GET(req: NextRequest) {
   const user = await authenticate(req);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimit = checkRateLimit(user.id, "/api/calls");
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: `Rate limit exceeded. Retry in ${rateLimit.resetIn} seconds.` },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": rateLimit.resetIn.toString(),
+        },
+      }
+    );
   }
 
   const { searchParams } = req.nextUrl;

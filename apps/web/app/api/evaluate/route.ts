@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { supabase, supabaseAdmin } from "../../../lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { cosineSimilarity, rouge1, bleuScore } from "./utils";
+import { validatePrompt, validateResponse, validateModel, validateProject } from "@/lib/validation";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -63,12 +65,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let { prompt, response, model, sdk_version, project } = await req.json();
-
-    if (!prompt) {
+    // Check rate limit
+    const rateLimit = checkRateLimit(user.id, "/api/evaluate");
+    if (!rateLimit.allowed) {
       return NextResponse.json(
-        { error: "prompt is required" },
-        { status: 400 },
+        { error: `Rate limit exceeded. Retry in ${rateLimit.resetIn} seconds.` },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": rateLimit.resetIn.toString(),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": new Date(Date.now() + rateLimit.resetIn * 1000).toISOString(),
+          },
+        }
+      );
+    }
+
+    const requestBody = await req.json();
+    let { prompt, response, model, sdk_version, project } = requestBody;
+
+    // Validate inputs
+    const validationErrors = [
+      ...validatePrompt(prompt),
+      ...validateResponse(response),
+      ...validateModel(model),
+      ...validateProject(project),
+    ];
+
+    if (validationErrors.length > 0) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validationErrors },
+        { status: 400 }
       );
     }
 
