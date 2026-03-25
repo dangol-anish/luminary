@@ -44,7 +44,17 @@ function computeAverage(metrics: any[], field: string) {
 async function sendNotification(alert: any) {
   const channels = alert.notification_channels || [];
 
-  if (channels.includes('email')) {
+  const canSendEmail =
+    typeof process.env.EMAIL_USER === "string" &&
+    process.env.EMAIL_USER.length > 0 &&
+    typeof process.env.EMAIL_PASS === "string" &&
+    process.env.EMAIL_PASS.length > 0 &&
+    typeof process.env.ALERT_EMAIL_RECIPIENT === "string" &&
+    process.env.ALERT_EMAIL_RECIPIENT.length > 0;
+
+  const canSendSlack = typeof process.env.SLACK_WEBHOOK_URL === "string" && process.env.SLACK_WEBHOOK_URL.length > 0;
+
+  if (channels.includes("email") && canSendEmail) {
     const transporter = nodemailer.createTransport({
       service: 'gmail', // or your email service
       auth: {
@@ -61,10 +71,22 @@ async function sendNotification(alert: any) {
     });
   }
 
-  if (channels.includes('slack')) {
+  if (channels.includes("slack") && canSendSlack) {
     await axios.post(process.env.SLACK_WEBHOOK_URL!, {
       text: `🚨 ${alert.message}`,
     });
+  }
+
+  // If we couldn't send to any configured channel (missing env vars), still mark as sent
+  // so cron retries don't repeatedly fail.
+  const sentEmail = channels.includes("email") && canSendEmail;
+  const sentSlack = channels.includes("slack") && canSendSlack;
+  if (!sentEmail && !sentSlack) {
+    await supabaseAdmin
+      .from("alerts")
+      .update({ notification_sent: true })
+      .eq("id", alert.id);
+    return;
   }
 
   // Mark as sent

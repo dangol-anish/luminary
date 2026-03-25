@@ -4,6 +4,7 @@ import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { cosineSimilarity, rouge1, bleuScore } from "./utils";
 import { validatePrompt, validateResponse, validateModel, validateProject } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limit";
+import crypto from "crypto";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -56,12 +57,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseAdmin.auth.getUser(token);
+    let user = null;
 
-    if (userError || !user) {
+    // Check if token is an API key
+    if (token.startsWith("lum_")) {
+      const keyHash = crypto.createHash("sha256").update(token).digest("hex");
+      const { data: apiKeyData } = await supabaseAdmin
+        .from("api_keys")
+        .select("user_id")
+        .eq("key_hash", keyHash)
+        .single();
+      
+      if (apiKeyData) {
+        user = { id: apiKeyData.user_id };
+      }
+    } else {
+      // Fallback: check if standard JWT
+      const { data: authData } = await supabaseAdmin.auth.getUser(token);
+      if (authData?.user) {
+        user = authData.user;
+      }
+    }
+
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

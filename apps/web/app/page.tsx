@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { formatDistanceToNow } from "date-fns";
@@ -57,8 +58,8 @@ export default function Dashboard() {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
-  const [email, setEmail] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
+  const router = useRouter();
 
   const [newPrompt, setNewPrompt] = useState("");
   const [newModel, setNewModel] = useState("gemini-2.5-flash");
@@ -77,6 +78,11 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+
+  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const [keysLoading, setKeysLoading] = useState(true);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyGenerated, setNewKeyGenerated] = useState<string | null>(null);
 
   const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d" | "custom">("24h");
   const [groupBy, setGroupBy] = useState<"hour" | "day" | "week">("hour");
@@ -302,6 +308,64 @@ export default function Dashboard() {
     setMetricsLoading(false);
   }
 
+  async function fetchApiKeys() {
+    setKeysLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) return;
+
+    const res = await fetch("/api/keys", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.ok) {
+      const json = await res.json();
+      setApiKeys(json.data || []);
+    }
+    setKeysLoading(false);
+  }
+
+  async function createApiKey() {
+    if (!newKeyName.trim()) return;
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) return;
+
+    const res = await fetch("/api/keys", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ name: newKeyName }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      setNewKeyName("");
+      setNewKeyGenerated(json.data.plainTextKey);
+      fetchApiKeys();
+    }
+  }
+
+  async function deleteApiKey(id: string) {
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) return;
+
+    const res = await fetch("/api/keys", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ id }),
+    });
+
+    if (res.ok) {
+      fetchApiKeys();
+    }
+  }
+
   async function resolveAlert(id: string) {
     const token = await supabase.auth.getSession();
     const accessToken = token.data.session?.access_token;
@@ -358,6 +422,7 @@ export default function Dashboard() {
     fetchMetrics();
     fetchAggregatedMetrics();
     fetchBreakdownMetrics();
+    fetchApiKeys();
 
     const channel = supabase
       .channel("realtime-calls")
@@ -375,6 +440,12 @@ export default function Dashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authLoading && !session) {
+      router.replace("/sign-in");
+    }
+  }, [authLoading, session, router]);
+
   // Refetch aggregated metrics when filters change
   useEffect(() => {
     if (!session) return;
@@ -390,23 +461,6 @@ export default function Dashboard() {
     rouge: parseFloat((c.metrics?.[0]?.rouge_score ?? 0).toFixed(3)),
   }));
 
-  const signIn = async () => {
-    if (!email) {
-      alert("Please enter your email");
-      return;
-    }
-
-    setAuthLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    setAuthLoading(false);
-
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Magic link sent. Check your email.");
-    }
-  };
-
   const signOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -420,20 +474,19 @@ export default function Dashboard() {
     return (
       <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
         <div className="max-w-md mx-auto">
-          <h1 className="text-2xl font-bold mb-4">Sign in to Luminary</h1>
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full p-2 rounded-md mb-2 bg-gray-900 border border-gray-700"
-          />
-          <button
-            onClick={signIn}
-            className="w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2 rounded-md"
+          <h1 className="text-2xl font-bold mb-4">Sign in required</h1>
+          <a
+            href="/sign-in"
+            className="block w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2 rounded-md text-center mb-2"
           >
-            Send magic link
-          </button>
+            Go to Sign in
+          </a>
+          <a
+            href="/sign-up"
+            className="block w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-md text-center"
+          >
+            Create account
+          </a>
         </div>
       </main>
     );
@@ -594,6 +647,69 @@ export default function Dashboard() {
                     className="px-3 py-1 text-xs rounded-md bg-emerald-700 hover:bg-emerald-600"
                   >
                     Mark resolved
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* API Keys */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">API Keys</p>
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              placeholder="Key Name (e.g., Production Python App)"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              className="flex-1 p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+            />
+            <button
+              onClick={createApiKey}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm font-medium"
+            >
+              Generate Key
+            </button>
+          </div>
+          
+          {newKeyGenerated && (
+            <div className="mb-4 p-4 bg-emerald-900/20 border border-emerald-800/50 rounded-md">
+              <p className="text-sm font-medium text-emerald-400 mb-2">New API Key Generated!</p>
+              <p className="text-xs text-gray-300 mb-3">
+                Please copy this key now. For your security, you will not be able to see it again.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 p-2 bg-gray-950 rounded text-sm text-gray-200 border border-gray-800 overflow-x-auto">
+                  {newKeyGenerated}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(newKeyGenerated);
+                    alert("Copied to clipboard!");
+                  }}
+                  className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+
+          {keysLoading ? (
+            <div className="text-gray-400">Loading keys...</div>
+          ) : apiKeys.length === 0 ? (
+            <div className="text-gray-400">No API keys found.</div>
+          ) : (
+            <div className="space-y-2">
+              {apiKeys.map((k) => (
+                <div key={k.id} className="p-3 bg-gray-800 border border-gray-700 rounded-md flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-medium text-sm text-gray-200">{k.name}</p>
+                    <p className="text-xs text-gray-400 mt-1 font-mono bg-gray-900 p-1 rounded inline-block">{k.key_preview}</p>
+                  </div>
+                  <button onClick={() => deleteApiKey(k.id)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 bg-red-900/20 rounded-md border border-red-900/50">
+                    Revoke
                   </button>
                 </div>
               ))}
