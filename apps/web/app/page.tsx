@@ -7,11 +7,14 @@ import { formatDistanceToNow } from "date-fns";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  Legend,
 } from "recharts";
 
 type Call = {
@@ -74,6 +77,75 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+
+  const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d" | "custom">("24h");
+  const [groupBy, setGroupBy] = useState<"hour" | "day" | "week">("hour");
+  const [aggregatedMetrics, setAggregatedMetrics] = useState<any[]>([]);
+  const [aggregatedLoading, setAggregatedLoading] = useState(false);
+  const [breakdownMetrics, setBreakdownMetrics] = useState<any[]>([]);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+
+  async function fetchAggregatedMetrics() {
+    setAggregatedLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setAggregatedLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("range", timeRange === "custom" ? "custom" : timeRange);
+    params.set("groupBy", groupBy);
+    if (timeRange === "custom") {
+      if (dateFrom) params.set("from", dateFrom);
+      if (dateTo) params.set("to", dateTo);
+    }
+    if (newProject) params.set("project", newProject);
+    if (newModel) params.set("model", newModel);
+
+    const res = await fetch(`/api/metrics/aggregated?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      setAggregatedMetrics(json.data || []);
+    }
+    setAggregatedLoading(false);
+  }
+
+  async function fetchBreakdownMetrics() {
+    setBreakdownLoading(true);
+    const token = await supabase.auth.getSession();
+    const accessToken = token.data.session?.access_token;
+    if (!accessToken) {
+      setBreakdownLoading(false);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("range", timeRange === "custom" ? "custom" : timeRange);
+    params.set("groupBy", "project");
+    if (timeRange === "custom") {
+      if (dateFrom) params.set("from", dateFrom);
+      if (dateTo) params.set("to", dateTo);
+    }
+
+    const res = await fetch(`/api/metrics/breakdown?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      setBreakdownMetrics(json.data || []);
+    }
+    setBreakdownLoading(false);
+  }
 
   async function fetchCalls() {
     setLoading(true);
@@ -147,7 +219,9 @@ export default function Dashboard() {
       }
 
       const json = await res.json();
-      setSubmitResult(`Score: ${json.score}/5 | BLEU: ${json.bleu} | ROUGE: ${json.rouge}`);
+      setSubmitResult(
+        `Score: ${json.score}/5 | BLEU: ${json.bleu} | ROUGE: ${json.rouge}`,
+      );
       setNewPrompt("");
       await fetchCalls();
       await fetchAlerts();
@@ -255,7 +329,6 @@ export default function Dashboard() {
     await fetchCalls();
   }
 
-
   useEffect(() => {
     // Expose supabase to browser console for debugging
     if (typeof window !== "undefined") {
@@ -283,6 +356,8 @@ export default function Dashboard() {
     fetchCalls();
     fetchAlerts();
     fetchMetrics();
+    fetchAggregatedMetrics();
+    fetchBreakdownMetrics();
 
     const channel = supabase
       .channel("realtime-calls")
@@ -299,6 +374,13 @@ export default function Dashboard() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Refetch aggregated metrics when filters change
+  useEffect(() => {
+    if (!session) return;
+    fetchAggregatedMetrics();
+    fetchBreakdownMetrics();
+  }, [timeRange, groupBy, dateFrom, dateTo, newProject, newModel, session]);
 
   const chartData = [...calls].reverse().map((c, i) => ({
     index: i + 1,
@@ -424,7 +506,11 @@ export default function Dashboard() {
               Include resolved alerts
             </label>
             <button
-              onClick={() => { fetchAlerts(); fetchMetrics(); fetchCalls(); }}
+              onClick={() => {
+                fetchAlerts();
+                fetchMetrics();
+                fetchCalls();
+              }}
               className="px-3 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs"
             >
               Refresh filters
@@ -444,8 +530,12 @@ export default function Dashboard() {
             >
               {submitLoading ? "Submitting..." : "Run and Evaluate"}
             </button>
-            {submitResult && <span className="text-sm text-emerald-300">{submitResult}</span>}
-            {submitError && <span className="text-sm text-red-300">{submitError}</span>}
+            {submitResult && (
+              <span className="text-sm text-emerald-300">{submitResult}</span>
+            )}
+            {submitError && (
+              <span className="text-sm text-red-300">{submitError}</span>
+            )}
           </div>
         </div>
 
@@ -489,8 +579,12 @@ export default function Dashboard() {
                   className="p-3 rounded-md bg-gray-800 border border-gray-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-3"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-200 font-medium">{alert.type}</p>
-                    <p className="text-xs text-gray-400 mt-1">{alert.message}</p>
+                    <p className="text-sm text-gray-200 font-medium">
+                      {alert.type}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {alert.message}
+                    </p>
                     <p className="text-xs text-gray-500 mt-1">
                       {alert.llm_calls?.project} / {alert.llm_calls?.model}
                     </p>
@@ -507,6 +601,60 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* Filter controls for time series */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Time series filters</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-2">Time Range</label>
+              <select
+                value={timeRange}
+                onChange={(e) => setTimeRange(e.target.value as any)}
+                className="w-full p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="24h">Last 24h</option>
+                <option value="7d">Last 7d</option>
+                <option value="30d">Last 30d</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-2">Group By</label>
+              <select
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value as any)}
+                className="w-full p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+              >
+                <option value="hour">Hour</option>
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+              </select>
+            </div>
+            {timeRange === "custom" && (
+              <>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-2">From</label>
+                  <input
+                    type="datetime-local"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-full p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-2">To</label>
+                  <input
+                    type="datetime-local"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-full p-2 rounded-md bg-gray-800 border border-gray-700 text-sm"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
         {/* Metrics history */}
         <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
           <p className="text-sm text-gray-400 mb-4">Metrics history</p>
@@ -519,12 +667,21 @@ export default function Dashboard() {
           ) : (
             <div className="text-sm text-gray-300 space-y-2 max-h-48 overflow-y-auto">
               {metrics.slice(0, 20).map((m) => (
-                <div key={m.id} className="p-2 border border-gray-800 rounded-md">
+                <div
+                  key={m.id}
+                  className="p-2 border border-gray-800 rounded-md"
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{m.llm_calls?.project || "unknown"}</span>
+                    <span className="font-medium">
+                      {m.llm_calls?.project || "unknown"}
+                    </span>
                     <span>{new Date(m.created_at).toLocaleString()}</span>
                   </div>
-                  <div className="text-xs text-gray-400">Score: {m.score} | BLEU: {(m.bleu_score ?? 0).toFixed(4)} | ROUGE: {(m.rouge_score ?? 0).toFixed(4)} | Similarity: {(m.cosine_similarity ?? 0).toFixed(4)}</div>
+                  <div className="text-xs text-gray-400">
+                    Score: {m.score} | BLEU: {(m.bleu_score ?? 0).toFixed(4)} |
+                    ROUGE: {(m.rouge_score ?? 0).toFixed(4)} | Similarity:{" "}
+                    {(m.cosine_similarity ?? 0).toFixed(4)}
+                  </div>
                 </div>
               ))}
             </div>
@@ -594,6 +751,105 @@ export default function Dashboard() {
               <span className="w-3 h-0.5 bg-red-400 inline-block" /> ROUGE score
             </span>
           </div>
+        </div>
+
+        {/* Time Series Chart */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Metrics time series</p>
+          {aggregatedLoading ? (
+            <div className="text-gray-400">Loading...</div>
+          ) : aggregatedMetrics.length === 0 ? (
+            <div className="text-gray-400">No data available.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={aggregatedMetrics}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="time"
+                  stroke="#6b7280"
+                  tick={{ fontSize: 11 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={80}
+                />
+                <YAxis stroke="#6b7280" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{
+                    background: "#111827",
+                    border: "1px solid #374151",
+                    borderRadius: 8,
+                  }}
+                  labelStyle={{ color: "#9ca3af" }}
+                  formatter={(value) => (typeof value === "number" ? value.toFixed(3) : value)}
+                />
+                <Legend wrapperStyle={{ paddingTop: 16 }} />
+                <Line
+                  type="monotone"
+                  dataKey="avgScore"
+                  stroke="#818cf8"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Avg Score"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="avgSimilarity"
+                  stroke="#34d399"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Avg Similarity"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="avgBleu"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Avg BLEU"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="avgRouge"
+                  stroke="#ef4444"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Avg ROUGE"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Project/Model Breakdown */}
+        <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+          <p className="text-sm text-gray-400 mb-4">Performance by project</p>
+          {breakdownLoading ? (
+            <div className="text-gray-400">Loading...</div>
+          ) : breakdownMetrics.length === 0 ? (
+            <div className="text-gray-400">No data available.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={breakdownMetrics}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis dataKey="name" stroke="#6b7280" tick={{ fontSize: 12 }} />
+                <YAxis stroke="#6b7280" tick={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{
+                    background: "#111827",
+                    border: "1px solid #374151",
+                    borderRadius: 8,
+                  }}
+                  labelStyle={{ color: "#9ca3af" }}
+                  formatter={(value) => (typeof value === "number" ? value.toFixed(3) : value)}
+                />
+                <Legend wrapperStyle={{ paddingTop: 16 }} />
+                <Bar dataKey="avgScore" fill="#818cf8" name="Avg Score" />
+                <Bar dataKey="avgSimilarity" fill="#34d399" name="Avg Similarity" />
+                <Bar dataKey="avgBleu" fill="#f59e0b" name="Avg BLEU" />
+                <Bar dataKey="avgRouge" fill="#ef4444" name="Avg ROUGE" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Calls table */}
